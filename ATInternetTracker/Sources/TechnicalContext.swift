@@ -211,7 +211,17 @@ class TechnicalContext: NSObject {
                 } else {
                     isTrackingEnabled = idfaInfo.0
                 }
-                #else
+								#elseif os(macOS)
+								if #available(macOS 11, *) {
+										#if canImport(AppTrackingTransparency)
+										isTrackingEnabled = ATTrackingManager.trackingAuthorizationStatus == ATTrackingManager.AuthorizationStatus.authorized
+										#else
+										isTrackingEnabled = false
+										#endif
+								} else {
+										isTrackingEnabled = idfaInfo.0
+								}
+								#else
                 if #available(iOS 14, *) {
                     #if canImport(AppTrackingTransparency)
                     isTrackingEnabled = ATTrackingManager.trackingAuthorizationStatus == ATTrackingManager.AuthorizationStatus.authorized
