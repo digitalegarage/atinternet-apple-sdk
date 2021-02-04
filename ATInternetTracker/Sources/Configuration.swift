@@ -194,8 +194,6 @@ class Configuration: NSObject {
             if let optDefaultConf = defaultConf as? [String: String] {
                 parameters = optDefaultConf
             }
-        } else {
-            print("no path found for DefaultConfiguration file")
         }
     }
     
