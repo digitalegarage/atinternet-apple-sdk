@@ -8,11 +8,19 @@
 import Foundation
 
 func pathFor(asset: String) -> String? {
-    let bundlePath = Bundle(for: Tracker.self).path(forResource: "TrackerBundle", ofType: "bundle")
-    if let bp = bundlePath {
-        let bundle = Bundle(path: bp)
-        return bundle?.path(forResource: asset, ofType: "png")
-    } else {
-        return nil
-    }
+	#if SWIFT_PACKAGE
+	return Bundle
+		.module
+		.path(forResource: asset,
+					ofType: "png")
+	#else
+	let bnd = Bundle(for: Tracker.self)
+		.path(forResource: asset,
+					ofType: "png",
+					inDirectory: "Images",
+					forLocalization: nil)
+
+	return bnd
+
+	#endif
 }
