@@ -23,7 +23,16 @@ let package = Package(
         "Crash.h",
         "Crash.m",
         "Hash.h",
-        "Hash.m"
+        "Hash.m",
+				"DefaultConfiguration.plist",
+				"DefaultConfiguration.plist-ipad",
+				"DefaultConfiguration.plist-iphone",
+				"DefaultConfiguration.plist-ipod",
+				"Info-iOS-Extension.plist",
+				"Info-iOS.plist",
+				"Info-tvOS.plist",
+				"Info-watchOS.plist",
+				"referential.json"
 			],
 			resources: [.process("Images")]
     ),
