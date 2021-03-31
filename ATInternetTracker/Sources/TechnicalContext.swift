@@ -43,19 +43,15 @@ import UIKit
 import WebKit
 #endif
 
-#if canImport(AppTrackingTransparency)
-import AppTrackingTransparency
-#endif
-
 /// Contextual information from user device
 class TechnicalContext: NSObject {
     /// SDK Version
     class var sdkVersion: String {
         get {
             #if os(watchOS) || os(tvOS)
-            return "1.19.3"
+            return "1.20.1"
             #else
-            return "2.22.3"
+            return "2.23.1"
             #endif
         }
     }
@@ -94,8 +90,6 @@ class TechnicalContext: NSObject {
     /// ID of the last level2 id set in parameters
     static var level2: String? = nil
     static var isLevel2Int: Bool = false
-    
-    static var generatedUUID: String? = nil
     
     /// Enable or disable user identification
     class var optOut: Bool {
@@ -139,61 +133,56 @@ class TechnicalContext: NSObject {
         if(!self.doNotTrack) {
             
             let uuid: () -> String = {
-                /// From context
-                if let id = TechnicalContext.generatedUUID {
-                    return id
-                }
                 
+                let userDefaults = UserDefaults.standard
                 let now = Int64(Date().timeIntervalSince1970) * 1000
                 
                 /// get uuid generation timestamp
                 var uuidGenerationTimestamp : Int64
-                if let optUUIDGenerationTimestamp = UserDefaults.standard.object(forKey: TechnicalContextKeys.UserIDGenerationTimestamp.rawValue) as? Int64 {
+                if let optUUIDGenerationTimestamp = userDefaults.object(forKey: TechnicalContextKeys.UserIDGenerationTimestamp.rawValue) as? Int64 {
                     uuidGenerationTimestamp = optUUIDGenerationTimestamp
                 } else {
-                    UserDefaults.standard.set(now, forKey: TechnicalContextKeys.UserIDGenerationTimestamp.rawValue)
-                    UserDefaults.standard.synchronize()
+                    _ = Privacy.storeData(Privacy.StorageFeature.userId, pairs: (TechnicalContextKeys.UserIDGenerationTimestamp.rawValue, now))
                     uuidGenerationTimestamp = now
                 }
                 
                 /// uuid expired ?
                 let daysSinceGeneration = (now - uuidGenerationTimestamp) / (1000 * 60 * 60 * 24)
                 if daysSinceGeneration >= uuidDuration {
-                    UserDefaults.standard.set(nil, forKey: TechnicalContextKeys.UserIDV1.rawValue)
-                    UserDefaults.standard.set(nil, forKey: TechnicalContextKeys.UserIDV2.rawValue)
-                    UserDefaults.standard.set(nil, forKey: TechnicalContextKeys.UserID.rawValue)
-                    UserDefaults.standard.synchronize()
+                    userDefaults.removeObject(forKey: TechnicalContextKeys.UserIDV1.rawValue)
+                    userDefaults.removeObject(forKey: TechnicalContextKeys.UserIDV2.rawValue)
+                    userDefaults.removeObject(forKey: TechnicalContextKeys.UserID.rawValue)
+                    userDefaults.synchronize()
                 }
                 
                 
                 /// Legacy
-                if UserDefaults.standard.object(forKey: TechnicalContextKeys.UserIDV1.rawValue) != nil {
-                    return UserDefaults.standard.object(forKey: TechnicalContextKeys.UserIDV1.rawValue) as! String
+                if userDefaults.object(forKey: TechnicalContextKeys.UserIDV1.rawValue) != nil {
+                    return userDefaults.object(forKey: TechnicalContextKeys.UserIDV1.rawValue) as! String
                 }
                 
                 /// Legacy
-                if UserDefaults.standard.object(forKey: TechnicalContextKeys.UserIDV2.rawValue) != nil {
-                    return UserDefaults.standard.object(forKey: TechnicalContextKeys.UserIDV2.rawValue) as! String
+                if userDefaults.object(forKey: TechnicalContextKeys.UserIDV2.rawValue) != nil {
+                    return userDefaults.object(forKey: TechnicalContextKeys.UserIDV2.rawValue) as! String
                 }
                 
                 /// No or expired id
-                if UserDefaults.standard.object(forKey: TechnicalContextKeys.UserID.rawValue) == nil {
+                if userDefaults.object(forKey: TechnicalContextKeys.UserID.rawValue) == nil {
                     let UUID = Foundation.UUID().uuidString
-                    UserDefaults.standard.set(UUID, forKey: TechnicalContextKeys.UserID.rawValue)
-                    UserDefaults.standard.set(now, forKey: TechnicalContextKeys.UserIDGenerationTimestamp.rawValue)
-                    UserDefaults.standard.synchronize()
-                    TechnicalContext.generatedUUID = UUID
+                    _ = Privacy.storeData(Privacy.StorageFeature.userId, pairs: (TechnicalContextKeys.UserID.rawValue, UUID), (TechnicalContextKeys.UserIDGenerationTimestamp.rawValue, now))
+                    
                     return UUID
                 }
                 
                 /// expiration relative
                 if uuidExpirationMode.lowercased() == "relative" {
-                    UserDefaults.standard.set(now, forKey: TechnicalContextKeys.UserIDGenerationTimestamp.rawValue)
-                    UserDefaults.standard.synchronize()
+                    _ = Privacy.storeData(Privacy.StorageFeature.userId, pairs: (TechnicalContextKeys.UserIDGenerationTimestamp.rawValue, now))
                 }
                 
-                let UUID = UserDefaults.standard.object(forKey: TechnicalContextKeys.UserID.rawValue) as! String
-                TechnicalContext.generatedUUID = UUID
+                guard let UUID = userDefaults.object(forKey: TechnicalContextKeys.UserID.rawValue) as? String else {
+                    return ""
+                }
+                
                 return UUID
             }
             
@@ -203,11 +192,7 @@ class TechnicalContext: NSObject {
                 
                 #if os(tvOS)
                 if #available(tvOS 14, *) {
-                    #if canImport(AppTrackingTransparency)
-                    isTrackingEnabled = ATTrackingManager.trackingAuthorizationStatus == ATTrackingManager.AuthorizationStatus.authorized
-                    #else
-                    isTrackingEnabled = false
-                    #endif
+                    isTrackingEnabled = isTrackingAuthorizationStatusAuthorized()
                 } else {
                     isTrackingEnabled = idfaInfo.0
                 }
@@ -223,11 +208,7 @@ class TechnicalContext: NSObject {
 								}
 								#else
                 if #available(iOS 14, *) {
-                    #if canImport(AppTrackingTransparency)
-                    isTrackingEnabled = ATTrackingManager.trackingAuthorizationStatus == ATTrackingManager.AuthorizationStatus.authorized
-                    #else
-                    isTrackingEnabled = false
-                    #endif
+                    isTrackingEnabled = isTrackingAuthorizationStatusAuthorized()
                 } else {
                     isTrackingEnabled = idfaInfo.0
                 }
@@ -264,6 +245,23 @@ class TechnicalContext: NSObject {
         } else {
             return "opt-out"
         }
+    }
+    
+    class func isTrackingAuthorizationStatusAuthorized() -> Bool {
+        guard let ATTrackingManagerClass = NSClassFromString("ATTrackingManager") else {
+            return false
+        }
+        
+        let trackingAuthorizationStatusSelector = NSSelectorFromString("trackingAuthorizationStatus")
+        guard let trackingAuthorizationStatusSelectorIMP = ATTrackingManagerClass.method(for: trackingAuthorizationStatusSelector) else {
+            return false
+        }
+        
+        typealias trackingAuthorizationStatusCType = @convention(c) (AnyObject, Selector) -> UInt
+        let getTrackingAuthorizationStatus = unsafeBitCast(trackingAuthorizationStatusSelectorIMP, to: trackingAuthorizationStatusCType.self)
+        let trackingAuthorizationStatus = getTrackingAuthorizationStatus(ATTrackingManagerClass.self, trackingAuthorizationStatusSelector)
+        
+        return trackingAuthorizationStatus == 3 /// authorized
     }
     
     class func getIdfaInfo() -> (Bool, String) {
@@ -328,6 +326,19 @@ class TechnicalContext: NSObject {
     
     class var model: String {
         if let simulatorModelIdentifier = ProcessInfo().environment["SIMULATOR_MODEL_IDENTIFIER"] { return simulatorModelIdentifier }
+        #if os(tvOS)
+        if #available(tvOS 14.0, *), ProcessInfo().isiOSAppOnMac {
+            return "tvOSAppOnMac"
+        }
+        #elseif os(watchOS)
+        if #available(watchOS 7.0, *), ProcessInfo().isiOSAppOnMac {
+            return "watchOSAppOnMac"
+        }
+        #else
+        if #available(iOS 14.0, *), ProcessInfo().isiOSAppOnMac {
+            return "iOSAppOnMac"
+        }
+        #endif
         var sysinfo = utsname()
         uname(&sysinfo)
         return String(bytes: Data(bytes: &sysinfo.machine, count: Int(_SYS_NAMELEN)), encoding: .ascii)?.trimmingCharacters(in: .controlCharacters) ?? ""
@@ -417,16 +428,19 @@ class TechnicalContext: NSObject {
         }
     }
     
+    #if os(iOS) && canImport(CoreTelephony)
+    private static let telephonyNetworkInfoInfo = CTTelephonyNetworkInfo()
+    #endif
+
     /// Carrier
     @objc class var carrier: String {
         get {
             #if os(iOS) && canImport(CoreTelephony) && !targetEnvironment(simulator)
-            let networkInfo = CTTelephonyNetworkInfo()
             var provider : CTCarrier? = nil
             if #available(iOS 12, *) {
-                provider = networkInfo.serviceSubscriberCellularProviders?.values.first
+                provider = telephonyNetworkInfoInfo.serviceSubscriberCellularProviders?.values.first
             } else {
-                provider = networkInfo.subscriberCellularProvider
+                provider = telephonyNetworkInfoInfo.subscriberCellularProvider
             }
             
             if let optProvider = provider {
@@ -452,88 +466,59 @@ class TechnicalContext: NSObject {
         }
     }
     
-    #if os(iOS) && canImport(WebKit)
-    static var webView : WKWebView?
-    #endif
-    
     @objc static var _defaultUserAgent: String?
     @objc class var defaultUserAgent: String? {
         get {
             if _defaultUserAgent == nil {
                 #if os(iOS) && canImport(WebKit)
-                if self.webView == nil {
-                    if Thread.isMainThread {
-                       self.webView = WKWebView(frame: .zero)
-                    } else {
-                        DispatchQueue.main.sync {
-                            self.webView = WKWebView(frame: .zero)
-                        }
-                    }
-                }
-                if self.webView != nil && !Thread.isMainThread {
+                if !Thread.isMainThread {
                     let semaphore = DispatchSemaphore(value: 0)
-                    DispatchQueue.main.sync {
-                        self.webView!.evaluateJavaScript("navigator.userAgent") { (data, error) in
-                            if let dataStr = data as? String {
-                                _defaultUserAgent = dataStr
-                            }
-                            semaphore.signal()
-                        }
+                    self.getUserAgentAsync { _ in
+                        semaphore.signal()
                     }
-                    _ = semaphore.wait(timeout: .distantFuture)
+                    _ = semaphore.wait(timeout: .now() + TimeInterval(5 * NSEC_PER_SEC)) // wait 5s max
                 }
                 #endif
             }
-            if _defaultUserAgent != nil {
-                return String(format: "%@ %@/%@", _defaultUserAgent!, applicationName, applicationVersion)
+            if let defaultUserAgent = _defaultUserAgent {
+                return String(format: "%@ %@/%@", defaultUserAgent, applicationName, applicationVersion)
             }
-            return _defaultUserAgent
+            return nil
         }
     }
-    
+
     /// Get user agent async
-    static func getUserAgentAsync(completionHandler: @escaping ((String) -> Void)) {
-        if _defaultUserAgent == nil {
-            #if os(iOS) && canImport(WebKit)
-            if self.webView == nil {
-                if Thread.isMainThread {
-                   self.webView = WKWebView(frame: .zero)
-                } else {
-                    DispatchQueue.main.sync {
-                        self.webView = WKWebView(frame: .zero)
-                    }
-                }
-            }
-            if self.webView != nil {
-                if Thread.isMainThread {
-                    self.webView!.evaluateJavaScript("navigator.userAgent") { (data, error) in
-                        if let dataStr = data as? String {
-                            _defaultUserAgent = dataStr
-                            completionHandler(String(format: "%@ %@/%@", _defaultUserAgent!, applicationName, applicationVersion))
-                        } else {
-                            completionHandler("")
-                        }
-                    }
-                } else {
-                    DispatchQueue.main.sync {
-                        self.webView!.evaluateJavaScript("navigator.userAgent") { (data, error) in
-                            if let dataStr = data as? String {
-                                _defaultUserAgent = dataStr
-                                completionHandler(String(format: "%@ %@/%@", _defaultUserAgent!, applicationName, applicationVersion))
-                            } else {
-                                completionHandler("")
-                            }
-                        }
-                    }
-                }
-            }
-            #endif
-            return
+    static func getUserAgentAsync(completionHandler: @escaping (String) -> Void) {
+        if let defaultUserAgent = _defaultUserAgent {
+            completionHandler(String(format: "%@ %@/%@", defaultUserAgent, applicationName, applicationVersion))
         }
-        if _defaultUserAgent != nil {
-            completionHandler(String(format: "%@ %@/%@", _defaultUserAgent!, applicationName, applicationVersion))
-        } else {
+        else {
+            #if os(iOS) && canImport(WebKit)
+            let getUserAgent = {
+                let webView = WKWebView(frame: CGRect(x: -1.0, y: -1.0, width: 1.0, height: 1.0))
+                webView.isHidden = true
+                // On older OSes and/or devices, javascript is paused if the webview is not in a window, so
+                // the `evaluateJavaScript` completion handler may never be called. This may happen in app
+                // extensions as well since we can't use the main window there.
+                #if !AT_EXTENSION
+                UIApplication.shared.delegate?.window??.insertSubview(webView, at: 0)
+                #endif
+                webView.evaluateJavaScript("navigator.userAgent") { (data, error) in
+                    if let dataStr = data as? String {
+                        _defaultUserAgent = dataStr
+                        completionHandler(String(format: "%@ %@/%@", dataStr, applicationName, applicationVersion))
+                    } else {
+                        completionHandler("")
+                    }
+                    DispatchQueue.main.async {
+                        webView.removeFromSuperview()
+                    }
+                }
+            }
+            Thread.isMainThread ? getUserAgent() : DispatchQueue.main.async(execute: getUserAgent)
+            #else
             completionHandler("")
+            #endif
         }
     }
 
@@ -556,20 +541,21 @@ class TechnicalContext: NSObject {
                     return ConnexionType.offline
                 } else {
                     #if os(iOS) && canImport(CoreTelephony)
-                    let telephonyInfo = CTTelephonyNetworkInfo()
                     var radioType : String? = nil
                     if #available(iOS 12, *) {
-                        radioType = telephonyInfo.serviceCurrentRadioAccessTechnology?.values.first
+                        radioType = telephonyNetworkInfoInfo.serviceCurrentRadioAccessTechnology?.values.first
                     } else {
-                        radioType = telephonyInfo.currentRadioAccessTechnology
+                        radioType = telephonyNetworkInfoInfo.currentRadioAccessTechnology
                     }
                     
                     if let rt = radioType {
                         if #available(iOS 14.1, *) {
                             // These radio types are not available in iOS 14.0 and 14.0.1 (causes crashes) although it seems like they are
+                            #if swift(>=5.3)
                             if rt == CTRadioAccessTechnologyNRNSA || rt == CTRadioAccessTechnologyNR {
                                 return ConnexionType.fiveg
                             }
+                            #endif
                         }
                         switch(rt) {
                         case CTRadioAccessTechnologyGPRS:
@@ -594,6 +580,10 @@ class TechnicalContext: NSObject {
                             return ConnexionType.threegplus
                         case CTRadioAccessTechnologyLTE:
                             return ConnexionType.fourg
+                        case "CTRadioAccessTechnologyNRNSA":
+                            return ConnexionType.fiveg
+                        case "CTRadioAccessTechnologyNR":
+                            return ConnexionType.fiveg
                         default:
                             return ConnexionType.unknown
                         }
